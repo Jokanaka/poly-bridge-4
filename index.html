@@ -44,7 +44,10 @@
     <button class="pill lvl" data-lvl="0">🟢 Tutorial</button>
     <button class="pill lvl" data-lvl="1">🔵 Fácil</button>
     <button class="pill lvl" data-lvl="2">🟠 Médio</button>
-    <button class="pill lvl" data-lvl="3">💀 Impossível</button>
+    <button class="pill lvl" data-lvl="3">🔴 Difícil</button>
+    <button class="pill lvl" data-lvl="4">💀 Impossível</button>
+    <button class="pill lvl" data-lvl="5">🧪 Livre</button>
+    <button class="pill" id="btnMute" title="Som">🔊</button>
   </div>
   <div class="row">
     <span class="small">Material:</span>
@@ -57,6 +60,7 @@
     <button class="pill car" data-car="bike">🏍️</button>
     <button class="pill car" data-car="car">🚗</button>
     <button class="pill car" data-car="truck">🚚</button>
+    <button class="pill car" data-car="bus">🚌</button>
     <button class="pill car" data-car="tank">🚜</button>
   </div>
   <div class="row">
@@ -71,7 +75,11 @@
 <div id="wrap">
   <canvas id="cv" width="1000" height="560"></canvas>
   <div id="hint"></div>
-  <div id="banner"><h1 id="bttl"></h1><div id="bsub" class="small"></div><button class="btnbig" id="bbtn">OK</button></div>
+  <div id="banner"><h1 id="bttl"></h1><div id="bsub" class="small"></div>
+    <div class="row" style="justify-content:center">
+      <button class="btnbig" id="bretry">↻ Tentar de novo <kbd>R</kbd></button>
+      <button class="btnbig" id="bbtn" style="background:#2c4d80">OK</button>
+    </div></div>
 </div>
 
 <script>
@@ -92,6 +100,7 @@ const CARS={
   bike :{label:'Moto'    ,mass:0.6,wheelR:9 ,len:34,color:'#39d98a',emoji:'🏍️'},
   car  :{label:'Carro'   ,mass:1.5,wheelR:11,len:44,color:'#ffd23f',emoji:'🚗'},
   truck:{label:'Caminhão',mass:3.2,wheelR:13,len:60,color:'#4aa3ff',emoji:'🚚'},
+  bus  :{label:'Ônibus'  ,mass:4.5,wheelR:13,len:74,color:'#ff8c42',emoji:'🚌'},
   tank :{label:'Tanque'  ,mass:6.0,wheelR:15,len:64,color:'#b06bff',emoji:'🚜'},
 };
 
@@ -115,18 +124,55 @@ const LEVELS=[
   carStart:[100,392],goalX:850,
   hint:'Pilar no meio + caminhão pesado. <b>Cabos</b> (4) só puxam — pendure-os do alto como ponte estaiada. Combine com treliça de aço.'},
 
+ {name:'Difícil',budget:2300,accent:'#5e2a1c',hazard:'água',car:'bus',
+  ground:[{x:0,y:420,w:250,h:142},{x:750,y:420,w:250,h:142}],
+  anchors:[[250,420],[250,300],[750,300],[750,420]],
+  carStart:[110,400],goalX:845,
+  hint:'Vão largo + <b>ônibus pesado</b>. Use as <b>torres</b> das pontas para uma treliça funda de aço com diagonais em X (cada quadrado vira triângulo). Cabos ajudam a segurar o meio.'},
+
  {name:'Impossível',budget:2600,accent:'#5e1c1c',hazard:'LAVA',car:'tank',
   ground:[{x:0,y:436,w:188,h:126},{x:812,y:436,w:188,h:126}],
   anchors:[[188,436],[188,288],[812,288],[812,436]],
   carStart:[80,416],goalX:892,
-  hint:'Vão enorme sobre a lava + <b>tanque de 7t</b> + orçamento curto. Use as <b>torres altas</b> das pontas: cabos do alto + treliça de aço. Estrada pura não tem chance. 💀'},
+  hint:'Vão enorme sobre a lava + <b>tanque de 7t</b> + orçamento curto. Use as <b>torres altas</b> das pontas: cabos do alto + treliça de aço com X. Estrada pura não tem chance. 💀'},
+
+ {name:'Livre',budget:9999,accent:'#1c3a5e',hazard:'água',car:'car',
+  ground:[{x:0,y:412,w:300,h:150},{x:700,y:412,w:300,h:150}],
+  anchors:[[300,412],[700,412]],
+  carStart:[120,392],goalX:800,
+  sandbox:true,
+  hint:'<b>Modo livre 🧪</b>: orçamento gigante, troque o veículo à vontade e teste qualquer estrutura. Sem pressão — só diversão e experimentos.'},
 ];
 
 /* ===== ESTADO ===== */
 let curLevel=0,curMat='road',curCar='car';
 let points=[],beams=[],history=[];
 let running=false,simTime=0,gameResult=null,car=null;
-let sparks=[];
+let sparks=[],frame=0;
+/* ===== ÁUDIO (WebAudio, sem arquivos) ===== */
+let actx=null,muted=false,engOsc=null,engGain=null,engF=null;
+function audioInit(){if(actx)return;try{actx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+function audioResume(){audioInit();if(actx&&actx.state==='suspended')actx.resume();}
+function beep(freq,dur,type,vol,when){if(!actx||muted)return;const t=actx.currentTime+(when||0);
+  const o=actx.createOscillator(),g=actx.createGain();o.type=type||'square';o.frequency.value=freq;
+  g.gain.value=0;o.connect(g);g.connect(actx.destination);
+  g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(vol||0.07,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur+0.02);}
+function snapSound(){if(!actx||muted)return;const n=Math.floor(actx.sampleRate*0.13);
+  const b=actx.createBuffer(1,n,actx.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,2.2);
+  const s=actx.createBufferSource();s.buffer=b;const g=actx.createGain();g.gain.value=0.22;
+  const f=actx.createBiquadFilter();f.type='bandpass';f.frequency.value=1400;
+  s.connect(f);f.connect(g);g.connect(actx.destination);s.start();}
+function engineStart(){if(!actx||muted||engOsc)return;engOsc=actx.createOscillator();engGain=actx.createGain();
+  engF=actx.createBiquadFilter();engF.type='lowpass';engF.frequency.value=600;
+  engOsc.type='sawtooth';engOsc.frequency.value=60;engGain.gain.value=0.0;
+  engOsc.connect(engF);engF.connect(engGain);engGain.connect(actx.destination);engOsc.start();}
+function engineStop(){if(engOsc){try{engOsc.stop();}catch(e){}engOsc=null;engGain=null;engF=null;}}
+function engineUpdate(spd){if(!engOsc)return;const tgt=Math.min(0.05,0.012+spd*0.02);
+  engGain.gain.value+=(tgt-engGain.gain.value)*0.2;engOsc.frequency.value=55+spd*45;}
+function winJingle(){beep(523,0.13,'square',0.08,0);beep(659,0.13,'square',0.08,0.12);beep(784,0.22,'square',0.09,0.24);beep(1046,0.3,'triangle',0.08,0.42);}
+function loseSound(){beep(180,0.5,'sawtooth',0.09,0);beep(120,0.6,'sawtooth',0.08,0.08);}
 const GRID=28, SNAP=20, MAX_BEAM=156, GRAV=0.5, DAMP=0.99, SUB=6, ITER=8;
 const best=JSON.parse(localStorage.getItem('pb4_best')||'{}');
 
@@ -159,7 +205,9 @@ function updateHUD(){
 }
 
 /* ===== CONSTRUÇÃO (grid + arrasto em cadeia) ===== */
-let mouse={x:0,y:0},drawing=false,lastNode=null,stroke=null;
+let mouse={x:0,y:0},drawing=false,lastNode=null,stroke=null,erasing=false;
+function eraseAt(m){let bi=-1,bd=11;beams.forEach((b,i)=>{const d=ptSeg(m,b.a,b.b);if(d<bd){bd=d;bi=i;}});
+  if(bi>=0){beams.splice(bi,1);cleanOrphans();updateHUD();return true;}return false;}
 function evt(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)*(W/r.width),y:(e.clientY-r.top)*(H/r.height)};}
 function getOrCreate(x,y){
   const n=findNode(x,y);if(n)return n;
@@ -175,7 +223,8 @@ function tryBeam(a,b){
   updateHUD();
 }
 cv.addEventListener('mousedown',e=>{
-  if(running||e.button===2)return;
+  if(running)return;
+  if(e.button===2){erasing=true;eraseAt(evt(e));return;}
   const m=evt(e);mouse=m;
   stroke={beams:[],pts:[]};
   const start=findNode(m.x,m.y) || (onGround(m.x,m.y)?null:getOrCreate(m.x,m.y));
@@ -184,6 +233,7 @@ cv.addEventListener('mousedown',e=>{
 });
 cv.addEventListener('mousemove',e=>{
   mouse=evt(e);
+  if(erasing){eraseAt(mouse);return;}
   if(!drawing)return;
   let tgt=findNode(mouse.x,mouse.y);
   if(!tgt){
@@ -196,18 +246,14 @@ cv.addEventListener('mousemove',e=>{
   if(tgt&&tgt!==lastNode){tryBeam(lastNode,tgt);lastNode=tgt;}
 });
 window.addEventListener('mouseup',()=>{
+  if(erasing){erasing=false;return;}
   if(!drawing){stroke=null;return;}
   drawing=false;
   if(stroke&&stroke.beams.length)history.push(stroke);
   else if(stroke){stroke.pts.forEach(p=>{if(!beams.some(b=>b.a===p||b.b===p))points=points.filter(x=>x!==p);});}
   stroke=null;lastNode=null;
 });
-cv.addEventListener('contextmenu',e=>{
-  e.preventDefault();if(running)return;
-  const m=evt(e);let bi=-1,bd=11;
-  beams.forEach((b,i)=>{const d=ptSeg(m,b.a,b.b);if(d<bd){bd=d;bi=i;}});
-  if(bi>=0){beams.splice(bi,1);cleanOrphans();updateHUD();}
-});
+cv.addEventListener('contextmenu',e=>e.preventDefault()); // apagar é via arrastar com o botão direito
 function cleanOrphans(){points=points.filter(p=>p.pinned||beams.some(b=>b.a===p||b.b===p));}
 
 /* ===== SIMULAÇÃO ===== */
@@ -222,10 +268,11 @@ function startSim(){
   const lw=addPoint(s[0]-h,s[1],false),rw=addPoint(s[0]+h,s[1],false),bd=addPoint(s[0],s[1]-22,false);
   const im=1/C.mass;lw.invMass=rw.invMass=im;bd.invMass=im*1.2;lw.car=rw.car=bd.car=true;
   const sb=(a,b)=>({a,b,rest:dist(a,b),mat:'steel',broken:false,strain:0,carBeam:true});
-  car={lw,rw,bd,R:C.wheelR,beams:[sb(lw,rw),sb(lw,bd),sb(rw,bd)],_maxx:s[0],_stuck:0};
+  car={lw,rw,bd,R:C.wheelR,beams:[sb(lw,rw),sb(lw,bd),sb(rw,bd)],_maxx:s[0],_stuck:0,_spin:0};
+  audioResume();engineStart();
 }
 function stopSim(){
-  running=false;gameResult=null;document.getElementById('btnRun').textContent='▶ Simular';
+  running=false;gameResult=null;engineStop();document.getElementById('btnRun').textContent='▶ Simular';
   if(car){points=points.filter(p=>!p.car);car=null;}
   for(const b of beams){b.broken=false;b.strain=0;}
   document.getElementById('hint').style.display='block';updateHUD();
@@ -289,21 +336,26 @@ function collide(){
     }
   }
 }
-function spark(b){const mx=(b.a.x+b.b.x)/2,my=(b.a.y+b.b.y)/2;for(let i=0;i<12;i++)sparks.push({x:mx,y:my,vx:(Math.random()-.5)*6,vy:(Math.random()-.5)*6-2,life:24+Math.random()*16});}
+function spark(b){const mx=(b.a.x+b.b.x)/2,my=(b.a.y+b.b.y)/2;for(let i=0;i<14;i++)sparks.push({x:mx,y:my,vx:(Math.random()-.5)*6,vy:(Math.random()-.5)*6-2,life:24+Math.random()*16});snapSound();}
 function finishSim(){
-  const L=LEVELS[curLevel];
-  if(gameResult==='win'){const c=totalCost();
-    const nb=best[curLevel]==null||c<best[curLevel];
-    if(nb){best[curLevel]=c;localStorage.setItem('pb4_best',JSON.stringify(best));}
-    flash('🎉 ATRAVESSOU!','Custo: $'+c+'  •  Recorde: $'+best[curLevel]+(nb?'  (novo recorde!)':''));
-  }else flash('💥 DESABOU!','A ponte não aguentou. Reforce os pontos vermelhos com triângulos.');
+  const L=LEVELS[curLevel];engineStop();
+  if(gameResult==='win'){winJingle();const c=totalCost();
+    if(L.sandbox){flash('🎉 ATRAVESSOU!','Modo livre — custo: $'+c+'. Boa! 🧪');}
+    else{const nb=best[curLevel]==null||c<best[curLevel];
+      if(nb){best[curLevel]=c;localStorage.setItem('pb4_best',JSON.stringify(best));}
+      flash('🎉 ATRAVESSOU!','Custo: $'+c+'  •  Recorde: $'+best[curLevel]+(nb?'  (novo recorde!)':''));}
+  }else{loseSound();flash('💥 DESABOU!','A ponte não aguentou. Reforce os pontos vermelhos com triângulos (X).');}
   running=false;document.getElementById('btnRun').textContent='▶ Simular';
 }
 
 /* ===== BANNER ===== */
 function flash(t,s){document.getElementById('bttl').textContent=t;document.getElementById('bsub').textContent=s;document.getElementById('banner').classList.add('show');}
-document.getElementById('bbtn').onclick=()=>{document.getElementById('banner').classList.remove('show');
-  if(car){points=points.filter(p=>!p.car);for(const b of beams){b.broken=false;b.strain=0;}car=null;document.getElementById('hint').style.display='block';updateHUD();}};
+function clearCar(){if(car){points=points.filter(p=>!p.car);car=null;}for(const b of beams){b.broken=false;b.strain=0;}}
+function closeBanner(){document.getElementById('banner').classList.remove('show');clearCar();running=false;engineStop();
+  document.getElementById('hint').style.display='block';document.getElementById('btnRun').textContent='▶ Simular';updateHUD();}
+function retrySim(){document.getElementById('banner').classList.remove('show');clearCar();startSim();}
+document.getElementById('bbtn').onclick=closeBanner;
+document.getElementById('bretry').onclick=retrySim;
 
 /* ===== RENDER (estilo blueprint Poly Bridge) ===== */
 function strainColor(b){const m=MAT[b.mat];let s=Math.min(1,Math.abs(b.strain)/m.maxStrain);
@@ -322,34 +374,58 @@ function drawBg(){
   ctx.beginPath();for(let x=0;x<=W;x+=GRID*4){ctx.moveTo(x,0);ctx.lineTo(x,H);}for(let y=0;y<=H;y+=GRID*4){ctx.moveTo(0,y);ctx.lineTo(W,y);}ctx.stroke();
 }
 function drawGround(){
-  const L=LEVELS[curLevel];
-  // zona de perigo (água/lava) no fundo do vão
-  const hz=L.hazard==='LAVA'?'rgba(255,90,40,0.16)':L.hazard==='água'?'rgba(90,170,255,0.13)':'rgba(255,255,255,0.04)';
-  ctx.fillStyle=hz;ctx.fillRect(0,508,W,52);
-  ctx.strokeStyle=L.hazard==='LAVA'?'#ff6a3a':L.hazard==='água'?'#6db6ff':'#ffffff55';
-  ctx.lineWidth=1.5;ctx.setLineDash([10,8]);ctx.beginPath();ctx.moveTo(0,508);ctx.lineTo(W,508);ctx.stroke();ctx.setLineDash([]);
-  ctx.fillStyle='#cfe0ff99';ctx.font='11px Segoe UI';ctx.fillText(L.hazard.toUpperCase(),12,524);
+  const L=LEVELS[curLevel];const lava=L.hazard==='LAVA',agua=L.hazard==='água';
+  const surf=506;
+  // líquido animado (água / lava) preenchendo o fundo do vão
+  if(lava||agua){
+    const top=lava?'#ff7a32':'#3a8fe0',bot=lava?'#7a1a00':'#0c2c55';
+    const g=ctx.createLinearGradient(0,surf,0,H);g.addColorStop(0,top);g.addColorStop(1,bot);
+    ctx.save();ctx.globalAlpha=lava?0.5:0.42;ctx.fillStyle=g;
+    ctx.beginPath();ctx.moveTo(0,H);
+    for(let x=0;x<=W;x+=8){const y=surf+Math.sin(x*0.03+frame*0.05)*4+Math.sin(x*0.07-frame*0.03)*3;ctx.lineTo(x,y);}
+    ctx.lineTo(W,H);ctx.closePath();ctx.fill();ctx.restore();
+    // crista da superfície
+    ctx.strokeStyle=lava?'#ffd08a':'#bfe3ff';ctx.lineWidth=2;ctx.globalAlpha=0.8;ctx.beginPath();
+    for(let x=0;x<=W;x+=8){const y=surf+Math.sin(x*0.03+frame*0.05)*4+Math.sin(x*0.07-frame*0.03)*3;x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+    ctx.stroke();ctx.globalAlpha=1;
+    // bolhas (lava) / brilhos (água)
+    for(let i=0;i<7;i++){const bx=((i*149+frame*(lava?1.1:0.6))%W);
+      const by=surf+16+((i*53+frame*(lava?1.3:0.8))%(H-surf-20));
+      ctx.fillStyle=lava?'rgba(255,210,120,0.5)':'rgba(200,235,255,0.4)';
+      ctx.beginPath();ctx.arc(bx,by,lava?2.5:1.8,0,7);ctx.fill();}
+  }else{ // penhasco: névoa de profundidade
+    const g=ctx.createLinearGradient(0,surf,0,H);g.addColorStop(0,'rgba(255,255,255,0.05)');g.addColorStop(1,'rgba(0,0,0,0.25)');
+    ctx.fillStyle=g;ctx.fillRect(0,surf,W,H-surf);
+  }
+  ctx.fillStyle='#cfe0ffcc';ctx.font='11px Segoe UI';ctx.fillText(L.hazard.toUpperCase(),12,H-10);
   // terreno: contorno branco estilo blueprint
   for(const gd of L.ground){
-    ctx.fillStyle='rgba(255,255,255,0.06)';ctx.fillRect(gd.x,gd.y,gd.w,gd.h);
+    const tg=ctx.createLinearGradient(0,gd.y,0,gd.y+gd.h);tg.addColorStop(0,'rgba(255,255,255,0.10)');tg.addColorStop(1,'rgba(255,255,255,0.03)');
+    ctx.fillStyle=tg;ctx.fillRect(gd.x,gd.y,gd.w,gd.h);
     ctx.strokeStyle='#dfe9ff';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(gd.x,gd.y);ctx.lineTo(gd.x+gd.w,gd.y);ctx.stroke();
     ctx.strokeStyle='#dfe9ff66';ctx.lineWidth=1.5;ctx.strokeRect(gd.x,gd.y,gd.w,gd.h);
-    // hachura interna
     ctx.strokeStyle='#ffffff14';ctx.lineWidth=1;ctx.beginPath();
     for(let x=gd.x;x<gd.x+gd.w;x+=14){ctx.moveTo(x,gd.y);ctx.lineTo(x-22,gd.y+22);}ctx.stroke();
   }
-  // bandeira de chegada
+  // bandeira de chegada (tremulando)
   let gy=560;for(const gd of L.ground)if(L.goalX>=gd.x&&L.goalX<=gd.x+gd.w)gy=gd.y;
   ctx.strokeStyle='#dfe9ff';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(L.goalX,gy);ctx.lineTo(L.goalX,gy-58);ctx.stroke();
-  ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.moveTo(L.goalX,gy-58);ctx.lineTo(L.goalX+32,gy-49);ctx.lineTo(L.goalX,gy-40);ctx.fill();
+  ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.moveTo(L.goalX,gy-58);
+  const wv=Math.sin(frame*0.12)*4;
+  ctx.quadraticCurveTo(L.goalX+16,gy-55+wv,L.goalX+32,gy-49);
+  ctx.quadraticCurveTo(L.goalX+16,gy-45-wv,L.goalX,gy-40);ctx.closePath();ctx.fill();
 }
 function drawBeam(b){
   if(b.broken)return;const m=MAT[b.mat];
   const ax=b.a.x,ay=b.a.y,bx=b.b.x,by=b.b.y;
   ctx.lineCap='round';
+  // brilho quando perto de romper
+  const stress=running?Math.min(1,Math.abs(b.strain)/m.maxStrain):0;
+  if(stress>0.65){ctx.save();ctx.shadowColor='#ff5a3a';ctx.shadowBlur=4+stress*12;}
   if(b.mat==='cable'){
     ctx.lineWidth=m.w;ctx.strokeStyle=running?strainColor(b):m.color;
-    ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();return;
+    ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();
+    if(stress>0.65)ctx.restore();return;
   }
   // viga 3D: contorno + topo claro
   ctx.lineWidth=m.w+2;ctx.strokeStyle=m.edge;
@@ -360,6 +436,7 @@ function drawBeam(b){
     ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();}
   if(m.road){ctx.lineWidth=2;ctx.strokeStyle='#ffd23faa';ctx.setLineDash([9,9]);
     ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();ctx.setLineDash([]);}
+  if(stress>0.65)ctx.restore();
 }
 function drawNode(p){
   if(p.pinned){ctx.fillStyle='#0e2244';ctx.beginPath();ctx.arc(p.x,p.y,6.5,0,7);ctx.fill();
@@ -370,9 +447,14 @@ function drawNode(p){
 function drawCar(){
   if(!car)return;const C=CARS[curCar],lw=car.lw,rw=car.rw,R=car.R;
   const ang=Math.atan2(rw.y-lw.y,rw.x-lw.x),cx=(lw.x+rw.x)/2,cy=(lw.y+rw.y)/2,L=C.len;
-  // rodas
+  car._spin=(car._spin||0)+((lw.x-lw.px)+(rw.x-rw.px))/(2*R);
+  // rodas (com raios girando)
   for(const w of[lw,rw]){ctx.fillStyle='#15171c';ctx.beginPath();ctx.arc(w.x,w.y,R,0,7);ctx.fill();
-    ctx.fillStyle='#cfd6e0';ctx.beginPath();ctx.arc(w.x,w.y,R*0.42,0,7);ctx.fill();
+    ctx.fillStyle='#cfd6e0';ctx.beginPath();ctx.arc(w.x,w.y,R*0.45,0,7);ctx.fill();
+    ctx.save();ctx.translate(w.x,w.y);ctx.rotate(car._spin);
+    ctx.strokeStyle='#15171c';ctx.lineWidth=2;
+    for(let k=0;k<4;k++){ctx.rotate(Math.PI/2);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(R*0.42,0);ctx.stroke();}
+    ctx.restore();
     ctx.fillStyle='#15171c';ctx.beginPath();ctx.arc(w.x,w.y,R*0.16,0,7);ctx.fill();}
   ctx.save();ctx.translate(cx,cy);ctx.rotate(ang);
   ctx.strokeStyle='#0009';ctx.lineWidth=2;ctx.fillStyle=C.color;
@@ -385,6 +467,9 @@ function drawCar(){
   else if(curCar==='truck'){rr(-L/2,-17,L*0.66,17,4);ctx.fill();ctx.stroke();
     rr(L/2-L*0.30,-28,L*0.30,28,4);ctx.fill();ctx.stroke();
     ctx.fillStyle='#bfe6ff';rr(L/2-L*0.27,-25,L*0.18,10,2);ctx.fill();}
+  else if(curCar==='bus'){rr(-L/2,-26,L,26,6);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#bfe6ff';for(let i=0;i<4;i++){rr(-L/2+7+i*(L-14)/4,-22,(L-22)/4-3,11,2);ctx.fill();}
+    ctx.fillStyle='#ffe9a0';ctx.beginPath();ctx.arc(L/2-3,-6,3,0,7);ctx.fill();}
   else{rr(-L/2,-15,L,15,4);ctx.fill();ctx.stroke();
     rr(-L*0.30,-28,L*0.55,15,4);ctx.fill();ctx.stroke();
     ctx.fillStyle=C.color;ctx.fillRect(L*0.16,-24,L*0.5,5);ctx.strokeRect(L*0.16,-24,L*0.5,5);} // canhão
@@ -392,6 +477,13 @@ function drawCar(){
 }
 function draw(){
   drawBg();drawGround();
+  // fantasma de encaixe + nó destacado ao passar o mouse (construção mais fácil)
+  if(!running&&!erasing){
+    const hov=findNode(mouse.x,mouse.y);
+    if(hov){ctx.strokeStyle='#ffd23f';ctx.lineWidth=2;ctx.beginPath();ctx.arc(hov.x,hov.y,9,0,7);ctx.stroke();}
+    else if(!drawing&&mouse.x>0&&mouse.x<W&&!onGround(mouse.x,mouse.y)){const s=snap(mouse.x,mouse.y);
+      ctx.fillStyle='rgba(255,255,255,0.18)';ctx.beginPath();ctx.arc(s.x,s.y,4,0,7);ctx.fill();}
+  }
   for(const b of beams)drawBeam(b);
   for(const p of points){if(!p.car)drawNode(p);}
   if(drawing&&lastNode){const t=findNode(mouse.x,mouse.y)||snap(mouse.x,mouse.y);
@@ -401,7 +493,12 @@ function draw(){
   drawCar();
   for(const s of sparks){ctx.globalAlpha=Math.max(0,s.life/40);ctx.fillStyle='#ffd166';ctx.fillRect(s.x,s.y,3,3);}ctx.globalAlpha=1;
 }
-function loop(){if(running&&!gameResult)physics();draw();requestAnimationFrame(loop);}
+function loop(){
+  frame++;
+  if(running&&!gameResult){physics();
+    if(car){const spd=(Math.abs(car.lw.x-car.lw.px)+Math.abs(car.rw.x-car.rw.px))/2;engineUpdate(spd);}}
+  draw();requestAnimationFrame(loop);
+}
 
 /* ===== UI ===== */
 document.querySelectorAll('.lvl').forEach(b=>b.onclick=()=>{stopSim();loadLevel(+b.dataset.lvl);});
@@ -410,6 +507,8 @@ document.querySelectorAll('.car').forEach(b=>b.onclick=()=>{if(running)return;cu
 document.getElementById('btnRun').onclick=()=>{running?stopSim():startSim();};
 document.getElementById('btnUndo').onclick=()=>{if(running||!history.length)return;const h=history.pop();beams=beams.filter(x=>!h.beams.includes(x));h.pts.forEach(p=>points=points.filter(x=>x!==p));cleanOrphans();updateHUD();};
 document.getElementById('btnClear').onclick=()=>{if(running)return;beams=[];points=points.filter(p=>p.pinned);history=[];updateHUD();};
+document.getElementById('btnMute').onclick=()=>{muted=!muted;if(muted)engineStop();
+  document.getElementById('btnMute').textContent=muted?'🔇':'🔊';};
 window.addEventListener('keydown',e=>{
   if(e.key==='1')document.querySelector('[data-mat=road]').click();
   if(e.key==='2')document.querySelector('[data-mat=wood]').click();
@@ -417,7 +516,10 @@ window.addEventListener('keydown',e=>{
   if(e.key==='4')document.querySelector('[data-mat=cable]').click();
   if(e.key===' '){e.preventDefault();document.getElementById('btnRun').click();}
   if(e.key==='z'||e.key==='Z')document.getElementById('btnUndo').click();
+  if(e.key==='r'||e.key==='R'){if(document.getElementById('banner').classList.contains('show'))retrySim();
+    else if(running){clearCar();startSim();}}
 });
+window.addEventListener('pointerdown',audioResume,{once:false});
 document.querySelector('[data-mat=road]').classList.add('active');
 loadLevel(0);loop();
 </script>
